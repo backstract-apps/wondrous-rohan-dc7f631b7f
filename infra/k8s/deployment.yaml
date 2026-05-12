@@ -51,19 +51,6 @@ spec:
           - path: "annotations"
             fieldRef:
               fieldPath: metadata.annotations
-      tolerations:
-        - key: "workload"
-          operator: "Equal"
-          value: "user"
-          effect: "NoSchedule"
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: nodepool
-                    operator: In
-                    values: ["spot-users"]
       containers:
       - name: wondrous-rohan-dc7f631b7f
         image: 216084506783.dkr.ecr.ap-south-1.amazonaws.com/backstract_apps:wondrous-rohan-dc7f631b7f
@@ -91,8 +78,8 @@ spec:
           name: metrics # Added port for metrics scraping
         resources:
           requests:
-            memory: "210Mi"
-            cpu: "200m"
+            memory: "512Mi"
+            cpu: "250m"
           limits:
             memory: "500Mi"
             cpu: "500m"
@@ -121,8 +108,8 @@ spec:
           readOnly: true
         resources:
           requests:
-            memory: "128Mi"
-            cpu: "100m"
+            memory: "512Mi"
+            cpu: "250m"
           limits:
-            memory: "384Mi"
-            cpu: "300m"
+            memory: "512Mi"
+            cpu: "250m"
