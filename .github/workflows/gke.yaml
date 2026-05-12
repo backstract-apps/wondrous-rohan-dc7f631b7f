@@ -47,6 +47,22 @@ jobs:
         cluster_name: ${{ env.GKE_CLUSTER }}
         location: ${{ env.GKE_REGION }}
 
+    - name: Create Kubernetes secret dynamically
+      run: |
+        # Create the .env file from GitHub Secrets
+        echo "${{ secrets.K8S_ENV_FILE }}" > .env
+    
+        # The namespace is apps-release
+        NAMESPACE="apps-release"
+        
+        # This must match the name exactly as it appears in your deployment.yaml
+        SECRET_NAME="app-secrets-coll-40b587e0e76f464c8cb78a581d06c1c5"
+    
+        kubectl create secret generic $SECRET_NAME \
+          --namespace $NAMESPACE \
+          --from-env-file=.env \
+          --dry-run=client -o yaml | kubectl apply -f -
+
     - name: Deploy to GKE
       uses: ./.github/actions/log-streamer
       env:
