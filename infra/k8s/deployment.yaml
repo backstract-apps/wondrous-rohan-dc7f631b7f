@@ -33,6 +33,8 @@ spec:
         app: wondrous-rohan-dc7f631b7f
         release: prometheus # Added label for PodMonitor discovery
     spec:
+      imagePullSecrets:
+        - name: aws-ecr-creds
       serviceAccountName: alloy-service-account
       volumes:
       - name: alloy-config
