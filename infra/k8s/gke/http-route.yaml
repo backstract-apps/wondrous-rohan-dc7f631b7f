@@ -1,0 +1,17 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: wondrous-rohan-route
+  namespace: apps-release
+spec:
+  parentRefs:
+  - name: lcnc-gateway
+    namespace: default    # Crucial: Points to the Gateway in 'default'
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /app2
+    backendRefs:
+    - name: wondrous-rohan-dc7f631b7f-srv
+      port: 80
