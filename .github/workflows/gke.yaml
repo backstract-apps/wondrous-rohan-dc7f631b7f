@@ -1,0 +1,101 @@
+name: CD - Deploy to GCP GKE
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  deploy-gke:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    env:
+      # GCP CONFIG
+      GCP_PROJECT_ID: platform-test-487912
+      GKE_CLUSTER: lcnc-cluster-delhi
+      GKE_REGION: asia-south2
+      NAMESPACE: apps-release
+      GCP_WIF_PROVIDER: "projects/208126041268/locations/global/workloadIdentityPools/github-actions-pool/providers/github-provider"
+      GCP_WIF_SA: "github-deployer@platform-test-487912.iam.gserviceaccount.com"
+      
+      # AWS CONFIG (To pull images from ECR)
+      AWS_REGION: ap-south-1
+      ECR_REGISTRY: 216084506783.dkr.ecr.ap-south-1.amazonaws.com
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: arn:aws:iam::216084506783:role/GitHubActionsDeployRole
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+        service_account: ${{ env.GCP_WIF_SA }}
+
+    - name: Get GKE Credentials
+      uses: google-github-actions/get-gke-credentials@v2
+      with:
+        cluster_name: ${{ env.GKE_CLUSTER }}
+        location: ${{ env.GKE_REGION }}
+
+    - name: Deploy to GKE
+      uses: ./.github/actions/log-streamer
+      env:
+        BST_TOKEN: ${{ secrets.BACKSTRACT_AUTH_TOKEN }}
+      with:
+        step_name: "GKE Deployment"
+        command: |
+          set -e
+          
+          # 1. Ensure Namespace exists
+          kubectl get ns $NAMESPACE || kubectl create ns $NAMESPACE
+          
+          # 2. Create/Update ECR Pull Secret for GKE
+          ECR_PASS=$(aws ecr get-login-password --region ${{ env.AWS_REGION }})
+          kubectl create secret docker-registry aws-ecr-creds \
+            --docker-server=${{ env.ECR_REGISTRY }} \
+            --docker-username=AWS \
+            --docker-password=$ECR_PASS \
+            --namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+
+          # 3. Inject Token and Strip EKS-specific lines
+          # This removes 'tolerations' and 'affinity' which Autopilot forbids
+          awk -v token="${BST_TOKEN}" '{gsub(/PLACEHOLDER_BST_TOKEN_REPLACE_AT_RUNTIME/, token)}1' "infra/k8s/deployment.yaml" > /tmp/gke_deployment.yaml
+          sed -i '/tolerations:/,+3d' /tmp/gke_deployment.yaml
+          sed -i '/affinity:/,+8d' /tmp/gke_deployment.yaml
+
+          # 4. Create Kubernetes secrets dynamically (from GitHub Secrets)
+          echo "${{ secrets.K8S_ENV_FILE }}" > .env
+          kubectl create secret generic app-secrets-coll-c766e74b4a974272b188e43d174331e7 \
+            --namespace $NAMESPACE --from-env-file=.env --dry-run=client -o yaml | kubectl apply -f -
+
+          # 5. Apply Infrastructure Manifests (RBAC, Configs)
+          # Note: aws-auth.yaml is skipped as it is EKS-only
+          kubectl apply -n $NAMESPACE -f infra/k8s/alloy-rbac.yaml
+          kubectl apply -n $NAMESPACE -f infra/k8s/alloy-configmap.yaml
+          kubectl apply -n $NAMESPACE -f infra/k8s/env-configmap.yaml
+          kubectl apply -n $NAMESPACE -f infra/k8s/gke/http-route.yaml
+          kubectl apply -n $NAMESPACE -f infra/k8s/gke/health-check.yaml
+
+          # 6. Apply App Manifests
+          kubectl apply -n $NAMESPACE -f /tmp/gke_deployment.yaml
+          kubectl apply -n $NAMESPACE -f "infra/k8s/service.yaml"
+          
+          # 7. Debug Output: Verify if Pods are being created
+          echo "Waiting for pods to initialize..."
+          sleep 10
+          kubectl get pods -n $NAMESPACE
+          
+          # 8. Final Rollout Check
+          kubectl rollout status deployment "wondrous-rohan-dc7f631b7f-depl" -n $NAMESPACE --timeout=300s
+        endpoint: https://api-release.beemerbenzbentley.site/sigma/api/v1/logs/github
+        token: ${{ secrets.BACKSTRACT_AUTH_TOKEN }}
