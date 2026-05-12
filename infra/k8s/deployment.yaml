@@ -22,7 +22,7 @@ metadata:
     app: wondrous-rohan-dc7f631b7f
     release: prometheus # Added label for PodMonitor discovery
 spec:
-  replicas: 0
+  replicas: 1
   selector:
     matchLabels:
       app: wondrous-rohan-dc7f631b7f
