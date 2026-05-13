@@ -17,7 +17,7 @@ spec:
       urlRewrite:
         path:
           type: ReplacePrefixMatch
-          replacePrefix: /  # This strips '/app2' so the pod sees '/'
+          rewritePrefix: /  # This strips '/app2' so the pod sees '/'
     backendRefs:
     - name: wondrous-rohan-dc7f631b7f-srv
       port: 80
