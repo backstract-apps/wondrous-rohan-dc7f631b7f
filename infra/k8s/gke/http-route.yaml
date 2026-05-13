@@ -11,7 +11,7 @@ spec:
   - matches:
     - path:
         type: PathPrefix
-        value: /
+        value: /us-west-1-backstractelb-eaea2f-coll-40b587e0e76f464c8cb78a581d06c1c5
     backendRefs:
     - name: wondrous-rohan-dc7f631b7f-srv
       port: 80
