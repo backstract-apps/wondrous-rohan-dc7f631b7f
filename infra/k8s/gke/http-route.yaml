@@ -5,8 +5,12 @@ metadata:
   namespace: apps-release
 spec:
   parentRefs:
-  - name: lcnc-gateway
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    name: lcnc-gateway
     namespace: default    # Crucial: Points to the Gateway in 'default'
+    hostnames:
+    - "cc1fbde45ead-in-south-02.mayson.dev"
   rules:
   - matches:
     - path:
