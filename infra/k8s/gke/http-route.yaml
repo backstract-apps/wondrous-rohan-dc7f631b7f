@@ -9,8 +9,8 @@ spec:
     kind: Gateway
     name: lcnc-gateway
     namespace: default    # Crucial: Points to the Gateway in 'default'
-    hostnames:
-    - "cc1fbde45ead-in-south-02.mayson.dev"
+  hostnames:
+  - "cc1fbde45ead-in-south-02.mayson.dev"
   rules:
   - matches:
     - path:
