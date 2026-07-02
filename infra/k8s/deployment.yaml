@@ -85,7 +85,7 @@ spec:
             cpu: "50m"
           limits:
             memory: "300Mi"
-            cpu: "1"
+            cpu: "250m"
 
       - name: alloy-sidecar
         image: grafana/alloy:latest
