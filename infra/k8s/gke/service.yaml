@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: wondrous-rohan-dc7f631b7f-srv
+  namespace: apps-release
+spec:
+  selector:
+    app: wondrous-rohan-dc7f631b7f
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 7070
+  type: NodePort
