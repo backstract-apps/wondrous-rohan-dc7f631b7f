@@ -1,16 +1,17 @@
-name: CD - Deploy to GCP GKE
+name: CD - GitOps Deploy via Argo CD
 
 on:
   push:
     branches: [ master ]
   workflow_dispatch:
 
+permissions:
+  id-token: write
+  contents: write # Enables committing sanitized manifests back to Git
+
 jobs:
-  deploy-gke:
+  deploy-gitops:
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
 
     env:
       # GCP CONFIG
@@ -47,71 +48,66 @@ jobs:
         cluster_name: ${{ env.GKE_CLUSTER }}
         location: ${{ env.GKE_REGION }}
 
-    - name: Create Kubernetes secret dynamically
+    # 1. Dynamically provision Runtime Secrets & ECR Credentials into GKE
+    - name: Provision Secrets & ECR Credentials in GKE
       run: |
-        # Create the .env file from GitHub Secrets
-        echo "${{ secrets.K8S_ENV_FILE }}" > .env
-    
-        # The namespace is apps-release
-        NAMESPACE="apps-release"
-        
-        # This must match the name exactly as it appears in your deployment.yaml
-        SECRET_NAME="app-secrets-coll-40b587e0e76f464c8cb78a581d06c1c5"
-    
-        kubectl create secret generic $SECRET_NAME \
-          --namespace $NAMESPACE \
-          --from-env-file=.env \
-          --dry-run=client -o yaml | kubectl apply -f -
+        # Ensure target namespace exists
+        kubectl get ns ${{ env.NAMESPACE }} || kubectl create ns ${{ env.NAMESPACE }}
 
-    - name: Deploy to GKE
-      uses: ./.github/actions/log-streamer
+        # Create/Update AWS ECR docker-registry pull secret
+        ECR_PASS=$(aws ecr get-login-password --region ${{ env.AWS_REGION }})
+        kubectl create secret docker-registry aws-ecr-creds \
+          --docker-server=${{ env.ECR_REGISTRY }} \
+          --docker-username=AWS \
+          --docker-password=$ECR_PASS \
+          --namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
+        # Create/Update App Environment Secrets directly in GKE
+        echo "${{ secrets.K8S_ENV_FILE }}" > .env
+        kubectl create secret generic app-secrets-coll-40b587e0e76f464c8cb78a581d06c1c5 \
+          --namespace ${{ env.NAMESPACE }} --from-env-file=.env --dry-run=client -o yaml | kubectl apply -f -
+
+        kubectl create secret generic app-secrets-coll-c766e74b4a974272b188e43d174331e7 \
+          --namespace ${{ env.NAMESPACE }} --from-env-file=.env --dry-run=client -o yaml | kubectl apply -f -
+
+    # 2. Sanitize deployment manifest for GKE Autopilot
+    - name: Sanitize Manifests for GKE
       env:
         BST_TOKEN: ${{ secrets.BACKSTRACT_AUTH_TOKEN }}
-      with:
-        step_name: "GKE Deployment"
-        command: |
-          set -e
-          
-          # 1. Ensure Namespace exists
-          kubectl get ns $NAMESPACE || kubectl create ns $NAMESPACE
-          
-          # 2. Create/Update ECR Pull Secret for GKE
-          ECR_PASS=$(aws ecr get-login-password --region ${{ env.AWS_REGION }})
-          kubectl create secret docker-registry aws-ecr-creds \
-            --docker-server=${{ env.ECR_REGISTRY }} \
-            --docker-username=AWS \
-            --docker-password=$ECR_PASS \
-            --namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+      run: |
+        # Inject Backstract token placeholder if present
+        if [ -f "infra/k8s/deployment.yaml" ]; then
+          awk -v token="${BST_TOKEN}" '{gsub(/PLACEHOLDER_BST_TOKEN_REPLACE_AT_RUNTIME/, token)}1' "infra/k8s/deployment.yaml" > /tmp/clean_deployment.yaml
+        elif [ -f "infra/k8s/gke/deployment.yaml" ]; then
+          awk -v token="${BST_TOKEN}" '{gsub(/PLACEHOLDER_BST_TOKEN_REPLACE_AT_RUNTIME/, token)}1' "infra/k8s/gke/deployment.yaml" > /tmp/clean_deployment.yaml
+        fi
 
-          # 3. Inject Token and Strip EKS-specific lines
-          # This removes 'tolerations' and 'affinity' which Autopilot forbids
-          awk -v token="${BST_TOKEN}" '{gsub(/PLACEHOLDER_BST_TOKEN_REPLACE_AT_RUNTIME/, token)}1' "infra/k8s/deployment.yaml" > /tmp/gke_deployment.yaml
-          sed -i '/tolerations:/,+3d' /tmp/gke_deployment.yaml
-          sed -i '/affinity:/,+8d' /tmp/gke_deployment.yaml
+        # Strip EKS-specific tolerations and affinity
+        sed -i '/tolerations:/,+3d' /tmp/clean_deployment.yaml
+        sed -i '/affinity:/,+8d' /tmp/clean_deployment.yaml
 
-          # 4. Create Kubernetes secrets dynamically (from GitHub Secrets)
-          echo "${{ secrets.K8S_ENV_FILE }}" > .env
-          kubectl create secret generic app-secrets-coll-c766e74b4a974272b188e43d174331e7 \
-            --namespace $NAMESPACE --from-env-file=.env --dry-run=client -o yaml | kubectl apply -f -
+        # Save clean manifest in infra/k8s/gke/
+        mkdir -p infra/k8s/gke
+        mv /tmp/clean_deployment.yaml infra/k8s/gke/deployment.yaml
 
-          # 5. Apply Infrastructure Manifests (RBAC, Configs)
-          # Note: aws-auth.yaml is skipped as it is EKS-only
-          kubectl apply -n $NAMESPACE -f infra/k8s/alloy-rbac.yaml
-          kubectl apply -n $NAMESPACE -f infra/k8s/alloy-configmap.yaml
-          kubectl apply -n $NAMESPACE -f infra/k8s/env-configmap.yaml
-          kubectl apply -n $NAMESPACE -f infra/k8s/gke/http-route.yaml
-          kubectl apply -n $NAMESPACE -f infra/k8s/gke/health-check.yaml
+    # 3. Commit clean manifests back to Git for Argo CD
+    - name: Commit Sanitized Manifests
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        
+        git add infra/k8s/gke/deployment.yaml
+        if ! git diff-index --quiet HEAD; then
+          git commit -m "chore(gitops): sanitize deployment for GKE Autopilot [skip ci]"
+          git push origin master
+        else
+          echo "No manifest changes to commit."
+        fi
 
-          # 6. Apply App Manifests
-          kubectl apply -n $NAMESPACE -f /tmp/gke_deployment.yaml
-          kubectl apply -n $NAMESPACE -f "infra/k8s/service.yaml"
-          
-          # 7. Debug Output: Verify if Pods are being created
-          echo "Waiting for pods to initialize..."
-          sleep 10
-          kubectl get pods -n $NAMESPACE
-          
-          # 8. Final Rollout Check
-          kubectl rollout status deployment "wondrous-rohan-dc7f631b7f-depl" -n $NAMESPACE --timeout=300s
-        endpoint: https://api-release.beemerbenzbentley.site/sigma/api/v1/logs/github
-        token: ${{ secrets.BACKSTRACT_AUTH_TOKEN }}
+    # 4. Notify Argo CD to sync immediately
+    - name: Trigger Argo CD Webhook Sync
+      run: |
+        curl -X POST -k https://argocd.backstract.io/api/webhook \
+          -H "Content-Type: application/json" \
+          -H "X-GitHub-Event: push" \
+          -d '{"ref": "refs/heads/master"}'
