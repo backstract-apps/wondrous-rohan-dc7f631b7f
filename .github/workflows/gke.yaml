@@ -99,6 +99,10 @@ jobs:
         git add infra/k8s/gke/deployment.yaml
         if ! git diff-index --quiet HEAD; then
           git commit -m "chore(gitops): sanitize deployment for GKE Autopilot [skip ci]"
+          
+          # Pull latest remote changes first to prevent push rejection
+          git pull --rebase origin master
+          
           git push origin master
         else
           echo "No manifest changes to commit."
