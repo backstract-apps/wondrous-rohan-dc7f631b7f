@@ -64,11 +64,11 @@ jobs:
 
         # Create/Update App Environment Secrets directly in GKE
         echo "${{ secrets.K8S_ENV_FILE }}" > .env
-        kubectl create secret generic app-secrets-coll-40b587e0e76f464c8cb78a581d06c1c5 \
-          --namespace ${{ env.NAMESPACE }} --from-env-file=.env --dry-run=client -o yaml | kubectl apply -f -
-
-        #kubectl create secret generic app-secrets-coll-c766e74b4a974272b188e43d174331e7 \
+        #kubectl create secret generic app-secrets-coll-40b587e0e76f464c8cb78a581d06c1c5 \
           #--namespace ${{ env.NAMESPACE }} --from-env-file=.env --dry-run=client -o yaml | kubectl apply -f -
+
+        kubectl create secret generic app-secrets-coll-c766e74b4a974272b188e43d174331e7 \
+          --namespace ${{ env.NAMESPACE }} --from-env-file=.env --dry-run=client -o yaml | kubectl apply -f -
 
     # 2. Sanitize deployment manifest for GKE Autopilot
     - name: Sanitize Manifests for GKE
